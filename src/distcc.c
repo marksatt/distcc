@@ -247,7 +247,7 @@ int main(int argc, char **argv)
     /* Expand @FILE arguments. */
     expandargv(&argc, &argv);
 #endif
- 
+	
     /* Ignore SIGPIPE; we consistently check error codes and will
      * see the EPIPE. */
     dcc_ignore_sigpipe(1);

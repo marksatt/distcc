@@ -89,6 +89,7 @@
 #include "util.h"
 #include "exitcode.h"
 #include "snprintf.h"
+#include "cpp_dialect.h"
 
 
 int dcc_argv_append(char **argv, char *toadd)
@@ -213,8 +214,15 @@ int dcc_scan_args(char *argv[], char **input_file, char **output_file,
                 rs_log_info("compiler will emit .rpo files; must be local");
                 return EXIT_DISTCC_FAILED;
             } else if (str_startswith("-x", a)) {
-                rs_log_info("gcc's -x handling is complex; running locally");
-                return EXIT_DISTCC_FAILED;
+                a = argv[++i];      /* get argument for -x */
+                char const*ext = dcc_ext_lookup(a);
+                if (ext) {
+                    dcc_opt_x_ext = ext;
+                    dcc_seen_opt_x = 1; /* if it's something we understand, keep parsing */
+                } else {
+                    rs_log_info("gcc's -x handling is complex; running locally");
+                    return EXIT_DISTCC_FAILED;
+                }
             } else if (str_startswith("-dr", a)) {
                 rs_log_info("gcc's debug option %s may write extra files; "
                             "running locally", a);

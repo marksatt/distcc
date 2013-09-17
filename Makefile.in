@@ -224,8 +224,8 @@ tarball_sig_bz2 = $(tarball_bz2).asc
 tarball_sig_gz = $(tarball_gz).asc
 distnews = $(PACKAGE_TARNAME)-$(VERSION).NEWS
 
-rpm_glob_pattern = "$(PACKAGE)"*[-_.]"$(VERSION)"[-_.]*.rpm
-deb_glob_pattern = "$(PACKAGE)"*[-_.]"$(VERSION)"[-_.]*.deb
+rpm_glob_pattern = "$(PACKAGE)"*[-_.]"$(VERSION)"[-_.]*.deb
+deb_glob_pattern = "$(PACKAGE)"*[-_.]"$(VERSION)"[-_.]*.rpm
 
 common_obj = src/arg.o src/argutil.o					\
 	src/cleanup.o src/compress.o					\
@@ -241,7 +241,8 @@ common_obj = src/arg.o src/argutil.o					\
 	src/implicit.o src/loadfile.o					\
 	lzo/minilzo.o                                                   \
 	@ZEROCONF_COMMON_OBJS@						\
-	@AUTH_COMMON_OBJS@
+	@AUTH_COMMON_OBJS@							\
+	src/cpp_dialect.o
 
 distcc_obj = src/backoff.o						\
 	src/climasq.o src/clinet.o src/clirpc.o				\
@@ -285,7 +286,8 @@ mon_obj =								\
 	src/rpc.o							\
 	src/snprintf.o src/state.o 					\
 	src/tempfile.o src/trace.o src/traceenv.o			\
-	src/util.o
+	src/util.o \
+    src/cpp_dialect.o
 
 gnome_obj = src/history.o src/mon-gnome.o				\
 	src/renderer.o
@@ -314,7 +316,7 @@ SRC =	src/stats.c							\
 	src/backoff.c src/bulk.c					\
 	src/cleanup.c							\
 	src/climasq.c src/clinet.c src/clirpc.c src/compile.c		\
-	src/compress.c src/cpp.c					\
+	src/compress.c src/cpp.c src/cpp_dialect.c				\
 	src/daemon.c src/distcc.c src/dsignal.c				\
 	src/dopt.c src/dparent.c src/exec.c src/filename.c		\
 	src/h_argvtostr.c						\
@@ -347,7 +349,7 @@ HEADERS = src/stats.h							\
 	src/access.h							\
 	src/auth.h							\
 	src/bulk.h							\
-	src/clinet.h src/compile.h					\
+	src/clinet.h src/compile.h src/cpp_dialect.h			\
 	src/daemon.h							\
 	src/distcc.h src/dopt.h src/exitcode.h				\
 	src/fix_debug_info.h						\
