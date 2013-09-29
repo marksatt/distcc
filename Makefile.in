@@ -165,6 +165,7 @@ include_server_PY = \
 	include_server/cache_basics.py \
 	include_server/compiler_defaults.py \
 	include_server/compress_files.py \
+	include_server/headermap.py \
 	include_server/include_analyzer.py \
 	include_server/include_analyzer_memoizing_node.py \
 	include_server/include_server.py \
@@ -242,7 +243,7 @@ common_obj = src/arg.o src/argutil.o					\
 	lzo/minilzo.o                                                   \
 	@ZEROCONF_COMMON_OBJS@						\
 	@AUTH_COMMON_OBJS@							\
-	src/cpp_dialect.o
+	@XCODE_INTEGRATION_COMMON_OBJS@					
 
 distcc_obj = src/backoff.o						\
 	src/climasq.o src/clinet.o src/clirpc.o				\
@@ -253,6 +254,7 @@ distcc_obj = src/backoff.o						\
 	src/timefile.o src/traceenv.o					\
 	src/include_server_if.o						\
 	src/where.o							\
+	@XCODE_INTEGRATION_DISTCC_OBJS@					\
 	@ZEROCONF_DISTCC_OBJS@						\
 	@AUTH_DISTCC_OBJS@						\
 	src/emaillog.o							\
@@ -266,6 +268,7 @@ distccd_obj = src/access.o						\
 	src/serve.o src/setuid.o src/srvnet.o src/srvrpc.o src/state.o	\
 	src/stats.o							\
 	src/fix_debug_info.o						\
+	@XCODE_INTEGRATION_DISTCCD_OBJS@				\
 	@ZEROCONF_DISTCCD_OBJS@						\
 	@AUTH_DISTCCD_OBJS@						\
 	$(common_obj) @BUILD_POPT@
@@ -286,14 +289,14 @@ mon_obj =								\
 	src/rpc.o							\
 	src/snprintf.o src/state.o 					\
 	src/tempfile.o src/trace.o src/traceenv.o			\
-	src/util.o \
-    src/cpp_dialect.o
+	src/util.o
 
 gnome_obj = src/history.o src/mon-gnome.o				\
 	src/renderer.o
 
 h_exten_obj = src/h_exten.o $(common_obj)
 h_issource_obj = src/h_issource.o $(common_obj)
+h_repsubstr_obj = src/h_repsubstr.o $(common_obj)
 h_scanargs_obj = src/h_scanargs.o $(common_obj)
 h_hosts_obj = src/h_hosts.o $(common_obj)
 h_argvtostr_obj = src/h_argvtostr.o $(common_obj)
@@ -322,7 +325,7 @@ SRC =	src/stats.c							\
 	src/h_argvtostr.c						\
 	src/h_exten.c src/h_hosts.c src/h_issource.c src/h_parsemask.c	\
 	src/h_sa2str.c src/h_scanargs.c src/h_strip.c			\
-	src/h_dotd.c src/h_compile.c src/h_getline.c			\
+	src/h_dotd.c src/h_compile.c src/h_getline.c h_repsubstr.c                      \
 	src/help.c src/history.c src/hosts.c src/hostfile.c		\
 	src/implicit.c src/io.c						\
 	src/loadfile.c src/lock.c 					\
@@ -342,6 +345,8 @@ SRC =	src/stats.c							\
 	src/dotd.c src/include_server_if.c				\
 	src/emaillog.c							\
 	src/fix_debug_info.c						\
+	src/xci_headermap.c src/xci_utils.c src/xci_versinfo.c		\
+	src/xci_zeroconf.c						\
 	src/zeroconf.c src/zeroconf-reg.c src/gcc-id.c
 
 
@@ -349,7 +354,8 @@ HEADERS = src/stats.h							\
 	src/access.h							\
 	src/auth.h							\
 	src/bulk.h							\
-	src/clinet.h src/compile.h src/cpp_dialect.h			\
+	src/byte_swapping.h					\
+	src/clinet.h src/compile.h					\
 	src/daemon.h							\
 	src/distcc.h src/dopt.h src/exitcode.h				\
 	src/fix_debug_info.h						\
@@ -365,8 +371,9 @@ HEADERS = src/stats.h							\
 	src/exec.h src/lock.h src/where.h src/srvnet.h			\
 	src/rslave.h							\
 	src/dotd.h src/include_server_if.h				\
-	src/emaillog.h 							\
-	src/va_copy.h 							\
+	src/emaillog.h							\
+	src/va_copy.h							\
+	src/xci.h							\
 	src/zeroconf.h
 
 conf_dir = packaging/RedHat/conf
@@ -421,6 +428,7 @@ check_PROGRAMS = \
 	h_fix_debug_info@EXEEXT@ \
 	h_hosts@EXEEXT@ \
 	h_issource@EXEEXT@ \
+	h_repsubstr@EXEEXT@ \
 	h_parsemask@EXEEXT@ \
 	h_sa2str@EXEEXT@ \
 	h_scanargs@EXEEXT@ \
@@ -510,6 +518,9 @@ h_exten@EXEEXT@: $(h_exten_obj)
 
 h_issource@EXEEXT@: $(h_issource_obj)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(h_issource_obj) $(LIBS)
+
+h_repsubstr@EXEEXT@: $(h_repsubstr_obj)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(h_repsubstr_obj) $(LIBS)
 
 h_sa2str@EXEEXT@: $(h_sa2str_obj)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(h_sa2str_obj) $(LIBS)

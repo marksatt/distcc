@@ -50,26 +50,19 @@ class ParseCommandUnitTest(unittest.TestCase):
 
     mock_compiler = '/usr/crosstool/v8/gcc-4.1.0-glibc-2.2.2/blah/gcc'
     self.mock_compiler = mock_compiler
-    mock_sysroot = '/usr/local/fake/sysroot'
-    self.mock_sysroot = mock_sysroot
 
-    def Mock_SetSystemDirsDefaults(compiler, sysroot, language, timer=None):
+    def Mock_SetSystemDirsDefaults(compiler, language, sysroot_info, timer=None):
       if compiler != mock_compiler:
         raise Exception, "compiler: %s, mock_compiler: %s" % (
           compiler, mock_compiler)
-      if sysroot != mock_sysroot:
-        raise Exception, "sysroot: %s, mock_sysroot: %s" % (
-          sysroot, mock_sysroot)
 
     self.compiler_defaults = lambda x: x
     self.compiler_defaults.SetSystemDirsDefaults =  Mock_SetSystemDirsDefaults
     self.compiler_defaults.system_dirs_default_all = []
     self.compiler_defaults.system_dirs_default = {}
-    system_dirs_default = self.compiler_defaults.system_dirs_default
-    system_dirs_default[mock_compiler] = {}
-    system_dirs_default[mock_compiler][mock_sysroot] = {}
-    system_dirs_default[mock_compiler][mock_sysroot]['c'] = []
-    system_dirs_default[mock_compiler][mock_sysroot]['c++'] = []
+    self.compiler_defaults.system_dirs_default[mock_compiler] = {}
+    self.compiler_defaults.system_dirs_default[mock_compiler]['c'] = { '': [] }
+    self.compiler_defaults.system_dirs_default[mock_compiler]['c++'] = { '': [] }
 
   def tearDown(self):
     shutil.rmtree(self.tmp)
@@ -125,15 +118,16 @@ class ParseCommandUnitTest(unittest.TestCase):
 
   def test_ParseCommandArgs(self):
 
+    # TODO(tvl): add -F and -iframework lines to the tests once we figure
+    # out how we're dealing with them.
+
     quote_dirs, angle_dirs, include_files, filepath, _incl_clos_f, _d_opts = (
       parse_command.ParseCommandArgs(
         parse_command.ParseCommandLine(
-          self.mock_compiler
-          + " --sysroot=" + self.mock_sysroot
-          + " -isystem system -Imice -iquote/and -I/men a.c "
-          + " -include included_A.h "
-          + " -includeincluded_B.h "
-          + "-Xlinker W,l -L /ignored_by_us -o a.o"),
+          self.mock_compiler + " -isystem system -Imice -iquote/and -I/men a.c "
+          " -include included_A.h "
+          " -includeincluded_B.h "
+          "-Xlinker W,l -L /ignored_by_us -o a.o"),
           os.getcwd(),
           self.includepath_map,
           self.directory_map,
@@ -153,9 +147,7 @@ class ParseCommandUnitTest(unittest.TestCase):
     self.assertRaises(NotCoveredError,
                       parse_command.ParseCommandArgs,
                       parse_command.ParseCommandLine(
-                        self.mock_compiler
-                        + " --sysroot=" + self.mock_sysroot
-                        + " -I- -iquote a.c"),
+                        self.mock_compiler +" -I- -iquote a.c"),
                       os.getcwd(),
                       self.includepath_map,
                       self.directory_map,
@@ -164,8 +156,7 @@ class ParseCommandUnitTest(unittest.TestCase):
     quote_dirs, angle_dirs, include_files, filepath, _incl_cls_file, _d_opts = (
       parse_command.ParseCommandArgs(parse_command.ParseCommandLine(
         "/usr/crosstool/v8/gcc-4.1.0-glibc-2.2.2/blah/gcc"
-        + " --sysroot=/usr/local/fake/sysroot"
-        + " -fno-exceptions -funsigned-char -D__STDC_FORMAT_MACROS -g0"
+        +  " -fno-exceptions -funsigned-char -D__STDC_FORMAT_MACROS -g0"
         + " -D_REENTRANT -DCOMPILER_GCC3 -DCOMPILER_GCC4 -DARCH_PIII -DOS_LINUX"
         + " -fmessage-length=0 -fno-strict-aliasing -fno-tree-vrp -D_REENTRANT"
         + " -DHAS_vsnprintf"

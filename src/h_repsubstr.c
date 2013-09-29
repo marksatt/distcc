@@ -1,9 +1,10 @@
 /* -*- c-file-style: "java"; indent-tabs-mode: nil -*-
  *
  * distcc -- A simple distributed compiler system
- * $Header: /data/cvs/distcc/src/h_scanargs.c,v 1.9 2003/07/13 08:08:02 mbp Exp $
+ * $Header: /data/cvs/distcc/src/h_issource.c,v 1.7 2003/07/13 08:08:02 mbp Exp $
  *
  * Copyright (C) 2002 by Martin Pool <mbp@samba.org>
+ * Copyright 2009 Google Inc.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -21,6 +22,7 @@
  * USA.
  */
 
+
 #include <config.h>
 
 #include <stdio.h>
@@ -35,38 +37,22 @@
 #include "distcc.h"
 #include "trace.h"
 #include "util.h"
-#include "implicit.h"
+
 
 const char *rs_program_name = __FILE__;
 
 
 /**
- * Test harness: make argument-parsing code accessible from the
- * command line so that it can be tested.
+ * Test harness: to test replace substring.
  **/
 int main(int argc, char *argv[])
 {
-    int result;
-    char *infname, *outfname;
-    char **newargv, **outargv;
-
-    rs_trace_set_level(RS_LOG_DEBUG);
-
-    if (argc < 2) {
-        rs_log_error("usage: h_scanargs COMMAND ARG...\n");
+    if (argc != 4) {
+        rs_log_error("usage: %s FILENAME", argv[0]);
         return 1;
     }
 
-    result = dcc_find_compiler(argv, &newargv);
-
-    if (result)
-    return result;
-
-    result = dcc_scan_args(newargv, &infname, &outfname, &outargv, NULL);
-
-    printf("%s %s %s\n",
-       result == 0 ? "distribute" : "local",
-       infname ? infname : "(NULL)", outfname ? outfname : "(NULL)");
+    printf("%s\n", dcc_replace_substring(argv[1], argv[2], argv[3]));
 
     return 0;
 }

@@ -874,3 +874,100 @@ ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
     return bytes_read == 0 ? -1 : (ssize_t) bytes_read;
 }
 #endif
+
+/* Given a string @p s, this function returns a new string with all
+ * occurrences of @p find replaced with the contents of @p replace.
+ * If any arguments are missing, or any error occurs, returns NULL.
+ */
+char *dcc_replace_substring(const char *s,
+                            const char *find, const char *replace) {
+    int s_left;
+    int buf_pos = 0, buf_size = 0;
+    char *buf = NULL, *new_buf;
+    const char *next;
+    int replace_len, find_len;
+    int len_change;
+	
+    if (!s || !find || !replace) {
+        rs_log_error("got NULL arguments");
+        goto out_error;
+    }
+	
+    find_len = strlen(find);
+    replace_len = strlen(replace);
+	
+    if (!find_len) {
+        rs_log_error("Asked to replace an empty string");
+        goto out_error;
+    }
+    
+    /* This is the number of chars we'll need to add each time we do
+     * a replacement.  If replace is shorter then find, we'll catch it
+     * with a final realloc when done. */
+    len_change = replace_len - find_len;
+    if (len_change < 0)
+	len_change = 0;
+	
+    s_left = strlen(s);
+    buf_size = s_left + 1;
+    buf = malloc(buf_size * sizeof(char));
+    if (!buf) {
+        rs_log_error("malloc(%ld) failed: %s",
+                     (long)buf_size * sizeof(char), strerror(errno));
+        goto out_error;
+    }
+	
+    /* Loop on matches */
+    while ((next = strstr(s, find))) {
+        if (len_change) {
+            buf_size += len_change;
+            new_buf = realloc(buf, buf_size * sizeof(char));
+            if (!new_buf) {
+                rs_log_error("realloc(%ld) failed: %s",
+                             (long)buf_size * sizeof(char), strerror(errno));
+                goto out_error;
+            }
+            buf = new_buf;
+        }
+        strncpy(buf + buf_pos, s, next - s);
+        buf_pos += (next - s);
+        s_left -= (next - s);
+        strcpy(buf + buf_pos, replace);
+        buf_pos += replace_len;
+        s_left -= find_len;
+		
+        s = next + find_len;
+    }
+    
+    /* Copy over what was left after the last replacement. */
+    if (s_left) {
+        strcpy(buf + buf_pos, s);
+        buf_pos += s_left;
+    }
+	
+    /* Terminate it. */
+    buf[buf_pos++] = '\0';
+    
+    /* If we shrunk the string, do a final realloc to downsize it
+     * to be the right length.  But, we don't fail if this doesn't
+     * work because the string will still be ok, just using more
+     * memory then needed. */
+    if (buf_pos < buf_size) {
+        buf_size = buf_pos;
+        new_buf = realloc(buf, buf_size * sizeof(char));
+        if (new_buf) {
+            buf = new_buf;
+        } else {
+            rs_log_info("realloc(%ld) failed: %s",
+                        (long)buf_size * sizeof(char), strerror(errno));
+        }
+    }
+	
+    return buf;
+	
+out_error:
+	
+    if (buf)
+	free(buf);
+    return NULL;
+}

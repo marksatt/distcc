@@ -58,13 +58,6 @@
  * @todo Perhaps make the argument parser driven by a data table.  (Would that
  * actually be clearer?)  Perhaps use regexps to recognize strings.
  *
- * @todo We could also detect options like "-x cpp-output" or "-x
- * assembler-with-cpp", because they should override language detection based
- * on extension.  I haven't seen anyone use them yet though.  In fact, since
- * we don't assemble remotely it is moot for the only reported case, the
- * Darwin C library.  We would also need to update the option when passing it
- * to the server.
- *
  * @todo Perhaps assume that assembly code will not use both #include and
  * .include, and therefore if we preprocess locally we can distribute the
  * compilation?  Assembling is so cheap that it's not necessarily worth
@@ -89,8 +82,9 @@
 #include "util.h"
 #include "exitcode.h"
 #include "snprintf.h"
-#include "cpp_dialect.h"
-
+#ifdef XCODE_INTEGRATION
+#  include "xci.h"
+#endif
 
 int dcc_argv_append(char **argv, char *toadd)
 {
@@ -98,6 +92,26 @@ int dcc_argv_append(char **argv, char *toadd)
     argv[l] = toadd;
     argv[l+1] = NULL;           /* just make sure */
     return 0;
+}
+
+static const char *dcc_optx_ext_lookup(const char *language_name) {
+    if (!strcmp(language_name, "c") ||
+        !strcmp(language_name, "cpp-output")) {
+        return ".i";
+    } else if (!strcmp(language_name, "c++") ||
+               !strcmp(language_name, "c++-cpp-output")) {
+        return ".ii";
+    } else if (!strcmp(language_name, "objective-c") ||
+               !strcmp(language_name, "objc-cpp-output") ||
+               !strcmp(language_name, "objective-c-cpp-output")) {
+        return ".mi";
+    } else if (!strcmp(language_name, "objective-c++") ||
+               !strcmp(language_name, "objc++-cpp-output") ||
+               !strcmp(language_name, "objective-c++-cpp-output")) {
+        return ".mii";
+    } else {
+        return NULL;
+    }
 }
 
 static void dcc_note_compiled(const char *input_file, const char *output_file)
@@ -126,14 +140,19 @@ static void dcc_note_compiled(const char *input_file, const char *output_file)
  * The copy is dynamically allocated and the caller is responsible for
  * deallocating it.
  *
+ * If @p forced_cpp_ext is non NULL, it is filled it with the extension that
+ * is forced by a -x language directive.  The caller should not free this
+ * value.
+ *
  * @returns 0 if it's ok to distribute this compilation, or an error code.
  **/
 int dcc_scan_args(char *argv[], char **input_file, char **output_file,
-                  char ***ret_newargv)
+                  char ***ret_newargv, const char **forced_cpp_ext)
 {
     int seen_opt_c = 0, seen_opt_s = 0;
     int i;
-    char *a;
+    char *a, *optx_lang;
+    const char *optx_ext = NULL;
     int ret;
 
      /* allow for -o foo.o */
@@ -145,10 +164,19 @@ int dcc_scan_args(char *argv[], char **input_file, char **output_file,
 
     dcc_trace_argv("scanning arguments", argv);
 
+#ifdef XCODE_INTEGRATION
+    /* Xcode invokes the distcc client as "distcc --host-info HOST" to gather
+     * info about HOST.  When the request is transmitted to the distccd server,
+     * it will see only "--host-info" and no other arguments in argv. */
+    if (argv[0] && !strcmp(argv[0], "--host-info")) {
+        return 0;
+    }
+#endif /* XCODE_INTEGRATION */
+
     /* Things like "distcc -c hello.c" with an implied compiler are
      * handled earlier on by inserting a compiler name.  At this
      * point, argv[0] should always be a compiler name. */
-    if (argv[0][0] == '-') {
+    if (argv[0] && argv[0][0] == '-') {
         rs_log_error("unrecognized distcc option: %s", argv[0]);
         exit(EXIT_BAD_ARGUMENTS);
     }
@@ -213,16 +241,32 @@ int dcc_scan_args(char *argv[], char **input_file, char **output_file,
             } else if (!strcmp(a, "-frepo")) {
                 rs_log_info("compiler will emit .rpo files; must be local");
                 return EXIT_DISTCC_FAILED;
+            } else if (!strcmp("-x", a)) {
+              optx_lang = argv[++i];
+              if (!optx_lang || !strlen(optx_lang)) {
+                rs_log_info("-x requires an argument; running locally");
+                return EXIT_DISTCC_FAILED;
+              }
+              if (*input_file) {
+                rs_log_info("-x must precede source file; running locally");
+                return EXIT_DISTCC_FAILED;
+              }
+              if (optx_ext) {
+                rs_log_info("at most one -x supported; running locally");
+                return EXIT_DISTCC_FAILED;
+              }
+              optx_ext = dcc_optx_ext_lookup(optx_lang);
+              if (!optx_ext) {
+                rs_log_info("unsupported -x language; running locally");
+                return EXIT_DISTCC_FAILED;
+              }
             } else if (str_startswith("-x", a)) {
-                a = argv[++i];      /* get argument for -x */
-                char const*ext = dcc_ext_lookup(a);
-                if (ext) {
-                    dcc_opt_x_ext = ext;
-                    dcc_seen_opt_x = 1; /* if it's something we understand, keep parsing */
-                } else {
-                    rs_log_info("gcc's -x handling is complex; running locally");
-                    return EXIT_DISTCC_FAILED;
-                }
+                /* Handling -xlanguage is possible, but it makes some of the
+                 * command rewriting (over in remote.c) much harder, so it
+                 * isn't supported at this time. */
+                rs_log_info("-xlanguage unsupported, use -x language instead; "
+                            "running locally");
+                return EXIT_DISTCC_FAILED;
             } else if (str_startswith("-dr", a)) {
                 rs_log_info("gcc's debug option %s may write extra files; "
                             "running locally", a);
@@ -314,6 +358,9 @@ int dcc_scan_args(char *argv[], char **input_file, char **output_file,
         rs_log_info("output to stdout?  running locally");
         return EXIT_DISTCC_FAILED;
     }
+
+    if (forced_cpp_ext)
+        *forced_cpp_ext = optx_ext;
 
     return 0;
 }
@@ -524,9 +571,50 @@ int dcc_expand_preprocessor_options(char ***argv_ptr) {
             }
             free(argv);
             *argv_ptr = argv = new_argv;
-            i += extra_args - 1;
-            argc += extra_args - 1;
         }
     }
+    return 0;
+}
+
+/* dcc_xci_mask_developer_dir_in_argv(), dcc_xci_unmask_developer_dir_in_argv()
+ *
+ * Loops through the args masking/unmasking the xcode developer dir.  The
+ * functions are a noop if XCODE_INTEGRATION is not defined.
+ */
+int dcc_xci_mask_developer_dir_in_argv(char **argv) {
+    if (!argv)
+        return EXIT_BAD_ARGUMENTS;
+#ifdef XCODE_INTEGRATION
+    int i;
+    char *arg, *new_arg;
+    for (i = 0; (arg = argv[i]); i++) {
+        new_arg = dcc_xci_mask_developer_dir(arg);
+        if (new_arg) {
+            free(arg);
+            argv[i] = new_arg;
+        } else {
+            return EXIT_OUT_OF_MEMORY;
+        }
+    }
+#endif
+    return 0;
+}
+
+int dcc_xci_unmask_developer_dir_in_argv(char **argv) {
+    if (!argv)
+        return EXIT_BAD_ARGUMENTS;
+#ifdef XCODE_INTEGRATION
+    int i;
+    char *arg, *new_arg;
+    for (i = 0; (arg = argv[i]); i++) {
+        new_arg = dcc_xci_unmask_developer_dir(arg);
+        if (new_arg) {
+            free(arg);
+            argv[i] = new_arg;
+        } else {
+            return EXIT_OUT_OF_MEMORY;
+        }
+    }
+#endif
     return 0;
 }

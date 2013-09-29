@@ -93,6 +93,34 @@ then
     AC_DEFINE(ENABLE_RFC2553,1,[use getaddrinfo(), getnameinfo(), etc])
 fi
 
+xcode_integration_default=no
+case "$host" in
+    *-apple-darwin*)
+        xcode_integration_default=yes
+        ;;
+esac
+
+AC_ARG_ENABLE(xcode-integration,
+              AC_HELP_STRING([--enable-xcode-integration],
+                             [enable Xcode integration ]
+                                 [(default enabled on Mac)]),
+              [],
+              [enable_xcode_integration=$xcode_integration_default])
+
+XCODE_INTEGRATION_COMMON_OBJS=
+XCODE_INTEGRATION_DISTCC_OBJS=
+XCODE_INTEGRATION_DISTCCD_OBJS=
+
+if test x"$enable_xcode_integration" = xyes ; then
+    AC_DEFINE(XCODE_INTEGRATION, 1, [Enable Xcode integration])
+    XCODE_INTEGRATION_COMMON_OBJS="src/xci_utils.o"
+    XCODE_INTEGRATION_DISTCCD_OBJS="src/xci_headermap.o src/xci_versinfo.o src/xci_zeroconf.o"
+fi
+
+AC_SUBST(XCODE_INTEGRATION_COMMON_OBJS)
+AC_SUBST(XCODE_INTEGRATION_DISTCC_OBJS)
+AC_SUBST(XCODE_INTEGRATION_DISTCCD_OBJS)
+
 AC_ARG_WITH(gnome,
         AC_HELP_STRING([--with-gnome], [build GNOME-based monitor]))
 
@@ -174,7 +202,7 @@ then
 -W -Wall -Wimplicit \
 -Wshadow -Wpointer-arith -Wcast-align -Wwrite-strings \
 -Waggregate-return -Wstrict-prototypes -Wmissing-prototypes \
--Wnested-externs -Wmissing-declarations"
+-Wnested-externs -Wmissing-declarations -Wno-cast-align -Wno-unused-parameter"
 
     # -Wuninitialized requires -O
     case "$CFLAGS" in "-O"*|*" -O"*)
@@ -493,9 +521,11 @@ AC_ARG_WITH(avahi,
         AC_HELP_STRING([--without-avahi], [build without avahi]))
 
 dnl check for avahi
+have_avahi=no
 if test x"$with_avahi" != xno; then
     PKG_CHECK_MODULES(AVAHI, [avahi-client >= 0.6],
     [AC_DEFINE(HAVE_AVAHI, 1, [defined if Avahi is available])
+    have_avahi=yes
     CFLAGS="$CFLAGS $AVAHI_CFLAGS"
     LIBS="$LIBS $AVAHI_LIBS"
     ZEROCONF_COMMON_OBJS="src/zeroconf.o src/gcc-id.o"
@@ -529,6 +559,13 @@ if test x"$with_auth" = xyes; then
 	                AUTH_COMMON_OBJS=""
                         AUTH_DISTCC_OBJS=""
                         AUTH_DISTCCD_OBJS="")
+fi
+
+dnl Check for dns_sd if Avahi is not present and Xcode integration is desired
+if test x"$have_avahi" = xno && test x"$enable_xcode_integration" = xyes ; then
+    AC_CHECK_HEADER(dns_sd.h,
+        [AC_SEARCH_LIBS(DNSServiceRegister, [dns_sd],
+            [AC_DEFINE(HAVE_DNSSD, 1, [Defined to use Bonjour DNS_SD])])])
 fi
 
 AC_SUBST(AUTH_COMMON_OBJS)

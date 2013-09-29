@@ -47,6 +47,10 @@
 #include "access.h"
 #include "exec.h"
 
+#ifdef XCODE_INTEGRATION
+  #include "xci.h"
+#endif
+
 int opt_niceness = 5;           /* default */
 
 /**
@@ -110,9 +114,22 @@ enum {
     opt_log_level
 };
 
-#ifdef HAVE_AVAHI
-/* Flag for enabling/disabling Zeroconf using Avahi */
+#if defined(HAVE_AVAHI) || (defined(XCODE_INTEGRATION) && defined(HAVE_DNSSD))
+/* Flag for enabling/disabling Zeroconf */
 int opt_zeroconf = 0;
+#endif
+
+#ifdef XCODE_INTEGRATION
+/* The priority of this distccd server relative to others.  This is set by
+ * the --priority argument.  It is not used by distcc, but it is used by
+ * Xcode when sorting the hosts in DISTCC_HOSTS.  The Xcode UI maps
+ * "low" to 20, "medium" to 10, and "high" to 0 when configuring launchd to
+ * start distccd. */
+int arg_priority = 10;
+
+/* System version string override.  If unset, the default will be used.
+ * This is handled in xci_versinfo.c. */
+char *arg_system_version = NULL;
 #endif
 
 const struct poptOption options[] = {
@@ -149,8 +166,14 @@ const struct poptOption options[] = {
     { "wizard", 'W',     POPT_ARG_NONE, 0, 'W', 0, 0 },
     { "stats", 0,        POPT_ARG_NONE, &arg_stats, 0, 0, 0 },
     { "stats-port", 0,   POPT_ARG_INT, &arg_stats_port, 0, 0, 0 },
-#ifdef HAVE_AVAHI
+#if defined(HAVE_AVAHI) || (defined(XCODE_INTEGRATION) && defined(HAVE_DNSSD))
     { "zeroconf", 0,     POPT_ARG_NONE, &opt_zeroconf, 0, 0, 0 },
+#endif
+#ifdef XCODE_INTEGRATION
+    { "host-info", 'I',  POPT_ARG_NONE, 0, 'I', 0, 0 },
+    { "priority", 0,     POPT_ARG_INT, &arg_priority, 0, 0, 0 },
+    { "system-version", 0, POPT_ARG_STRING, &arg_system_version, 0, 0, 0},
+    { "xcode-dir", 0,    POPT_ARG_STRING, &arg_xcode_dir, 0, 0, 0},
 #endif
     { 0, 0, 0, 0, 0, 0, 0 }
 };
@@ -173,6 +196,11 @@ static void distccd_show_usage(void)
 "    --user USER                if run by root, change to this persona\n"
 "    --jobs, -j LIMIT           maximum tasks at any time\n"
 "    --job-lifetime SECONDS     maximum lifetime of a compile request\n"
+#ifdef XCODE_INTEGRATION
+"    --host-info                display system/compiler information and exit\n"
+"    --system-version           override system version reported to Xcode\n"
+"    --xcode-dir                override Xcode Developer directory\n"
+#endif
 "  Networking:\n"
 "    -p, --port PORT            TCP port to listen on\n"
 "    --listen ADDRESS           IP address to listen on\n"
@@ -184,8 +212,11 @@ static void distccd_show_usage(void)
 #endif
 "    --stats                    enable statistics reporting via HTTP server\n"
 "    --stats-port PORT          TCP port to listen on for statistics requests\n"
-#ifdef HAVE_AVAHI
+#if defined(HAVE_AVAHI) || (defined(XCODE_INTEGRATION) && defined(HAVE_DNSSD))
 "    --zeroconf                 register via mDNS/DNS-SD\n"
+#endif
+#ifdef XCODE_INTEGRATION
+"    --priority                 Xcode selection priority (lower preferred)\n"
 #endif
 "  Debug and trace:\n"
 "    --log-level=LEVEL          set detail level for log file\n"
@@ -225,6 +256,9 @@ int distccd_parse_options(int argc, const char **argv)
 {
     poptContext po;
     int po_err, exitcode;
+#ifdef XCODE_INTEGRATION
+    const char *host_info;
+#endif
 
     po = poptGetContext("distccd", argc, argv, options, 0);
 
@@ -357,6 +391,23 @@ int distccd_parse_options(int argc, const char **argv)
             rs_trace_set_level(RS_LOG_DEBUG);
             opt_log_level_num = RS_LOG_DEBUG;
             break;
+
+#ifdef XCODE_INTEGRATION
+        case 'I':
+            /* For --host-info.  Having this as a distccd option seems kind
+             * of weird, but Xcode runs "distccd --host-info localhost" to
+             * determine information about the running system,
+             * locally-installed compilers, and distcc version.  (The
+             * localhost" argument is ignored.) */
+
+            if ((host_info = dcc_xci_host_info_string())) {
+                printf("%s", host_info);
+                exitcode = 0;
+            } else {
+                exitcode = EXIT_DISTCC_FAILED;
+            }
+            goto out_exit;
+#endif /* XCODE_INTEGRATION */
 
         default:                /* bad? */
             rs_log(RS_LOG_NONAME|RS_LOG_ERR|RS_LOG_NO_PID, "%s: %s",

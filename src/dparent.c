@@ -75,6 +75,10 @@
 #include "auth.h"
 #endif
 
+#ifdef XCODE_INTEGRATION
+  #include "xci.h"
+#endif
+
 static void dcc_nofork_parent(int listen_fd) NORETURN;
 static void dcc_detach(void);
 static void dcc_save_pid(pid_t);
@@ -99,7 +103,9 @@ int dcc_standalone_server(void)
     int n_cpus;
     int ret;
 #ifdef HAVE_AVAHI
+#if 0  // http://code.google.com/p/toolwhip/issues/detail?id=3
     void *avahi = NULL;
+#endif  // http://code.google.com/p/toolwhip/issues/detail?id=3
 #endif
 
     if ((ret = dcc_socket_listen(arg_port, &listen_fd, opt_listen_addr)) != 0)
@@ -138,11 +144,18 @@ int dcc_standalone_server(void)
     /* Don't catch signals until we've detached or created a process group. */
     dcc_daemon_catch_signals();
 
-#ifdef HAVE_AVAHI
+#if defined(HAVE_AVAHI) || (defined(XCODE_INTEGRATION) && defined(HAVE_DNSSD))
     /* Zeroconf registration */
     if (opt_zeroconf) {
+#ifdef HAVE_AVAHI
+#if 0  // http://code.google.com/p/toolwhip/issues/detail?id=3
         if (!(avahi = dcc_zeroconf_register((uint16_t) arg_port, n_cpus)))
             return EXIT_CONNECT_FAILED;
+#endif  // http://code.google.com/p/toolwhip/issues/detail?id=3
+#endif
+#ifdef XCODE_INTEGRATION
+        dcc_xci_zeroconf_register();
+#endif
     }
 #endif
 

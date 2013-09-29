@@ -344,7 +344,8 @@ class IncludeAnalyzerMemoizingNode(include_analyzer.IncludeAnalyzer):
       file_dir_idx: consider the file F that has the line '#include "fp"'
         which is causing us to call FindNode on fp.  file_dir_idx is the
         index of dirname(F).  (This argument affects the semantics of
-        resolution for resolution_mode == QUOTE.)
+        resolution for resolution_mode == QUOTE, and is also used to resolve
+        subframework includes.)
       fp_real_idx: the realpath index of resolved filepath
         (Useful for resolution_mode == RESOLVED only.)
     Returns:
@@ -371,7 +372,6 @@ class IncludeAnalyzerMemoizingNode(include_analyzer.IncludeAnalyzer):
                     and self.IsIncludepathIndex(fp))))
     assert resolution_mode in RESOLUTION_MODES
     assert not resolution_mode == QUOTE or file_dir_idx
-    assert not file_dir_idx or resolution_mode == QUOTE
     assert not fp_real_idx or resolution_mode == RESOLVED
 
     if __debug__:
@@ -420,10 +420,10 @@ class IncludeAnalyzerMemoizingNode(include_analyzer.IncludeAnalyzer):
 
       if resolution_mode == QUOTE:
         (fp_resolved_pair, fp_real_idx) = (
-          resolve(fp, currdir_idx, file_dir_idx, quote_dirs))
+          resolve(fp, currdir_idx, file_dir_idx, quote_dirs, file_dir_idx))
       elif resolution_mode == ANGLE:
          (fp_resolved_pair, fp_real_idx) = (
-           resolve(fp, currdir_idx, None, angle_dirs))
+           resolve(fp, currdir_idx, None, angle_dirs, file_dir_idx))
       elif resolution_mode == NEXT:
         # The node we return is just a dummy whose children are all the
         # possible resolvants.
@@ -445,8 +445,9 @@ class IncludeAnalyzerMemoizingNode(include_analyzer.IncludeAnalyzer):
          self.mirrored.add((fp_resolved_pair, currdir_idx))
          self.mirror_path.DoPath(
             os.path.join(dir_map.string[currdir_idx],
-                         dir_map.string[d_],
-                         includepath_map.string[fp_]),
+                         basics.PathFromDirMapEntryAndInclude(
+                                                dir_map.string[d_],
+                                                includepath_map.string[fp_])),
             currdir_idx,
             self.client_root_keeper.client_root)
 
@@ -469,7 +470,7 @@ class IncludeAnalyzerMemoizingNode(include_analyzer.IncludeAnalyzer):
         # angle_dirs.  Recurse for each success.
         for d in quote_dirs:
           (fp_resolved_pair_, fp_real_idx_) = (
-            resolve(fp, currdir_idx, None, (d,)))
+            resolve(fp, currdir_idx, None, (d,), file_dir_idx))
           if fp_resolved_pair_ != None:
             node_ = self.FindNode(nodes_for_incl_config,
                                   fp_resolved_pair_,
@@ -536,6 +537,8 @@ class IncludeAnalyzerMemoizingNode(include_analyzer.IncludeAnalyzer):
       (quote_includes, angle_includes, expr_includes, next_includes) = (
         self.file_cache[fp_real_idx])
 
+    if self.systemdir_prefix_cache.StartsWithSystemdir(fp_real_idx, self.realpath_map):
+      return node
 
     # Do the includes of the form #include "foo.h".
     for quote_filepath in quote_includes:
@@ -546,7 +549,8 @@ class IncludeAnalyzerMemoizingNode(include_analyzer.IncludeAnalyzer):
         support_record.Update(node_[self.SUPPORT_RECORD].support_id)
     # Do the includes of the form #include <foo.h>.
     for angle_filepath in angle_includes:
-      node_ = self.FindNode(nodes_for_incl_config, angle_filepath, ANGLE)
+      node_ = self.FindNode(nodes_for_incl_config, angle_filepath, ANGLE,
+                            fp_dirname_idx)
       if node_:
         children.append(node_)
         support_record.Update(node_[self.SUPPORT_RECORD].support_id)
@@ -583,9 +587,10 @@ class IncludeAnalyzerMemoizingNode(include_analyzer.IncludeAnalyzer):
       #  on symbols.
       support_record.UpdateSet(symbols)
 
-    # Do includes of the form #include_next "foo.h" or # #include_next <foo.h>.
+    # Do includes of the form #include_next "foo.h" or #include_next <foo.h>.
     for include_next_filepath in next_includes:
-      node_ = self.FindNode(nodes_for_incl_config, include_next_filepath, NEXT)
+      node_ = self.FindNode(nodes_for_incl_config, include_next_filepath, NEXT,
+                            fp_dirname_idx)
       if node_:
         children.append(node_)
         support_record.Update(node_[self.SUPPORT_RECORD].support_id)

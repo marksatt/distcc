@@ -122,6 +122,62 @@ static int dcc_wait_for_cpp(pid_t cpp_pid,
     return 0;
 }
 
+static const char *dcc_map_optx_language_for_cpp(const char *language, int use_new_names) {
+    /* These are the only types we allowed in arg.c */
+
+    static const char* keys[] = {
+    	"c",
+    	"c++",
+    	"objective-c",
+    	"objective-c++",
+    	"cpp-output",
+    	"c++-cpp-output",
+    	"objc-cpp-output",
+    	"objc++-cpp-output",
+    	"objective-c-cpp-output",
+    	"objective-c++-cpp-output",
+    	NULL};
+    
+    static const char* old_transforms[] = {
+    	"cpp-output",
+    	"c++-cpp-output",
+    	"objc-cpp-output",
+    	"objc++-cpp-output",
+    	"cpp-output",
+    	"c++-cpp-output",
+    	"objc-cpp-output",
+    	"objc++-cpp-output",
+    	"objc-cpp-output",
+    	"objc++-cpp-output",
+    	NULL};
+
+    static const char* new_transforms[] = {
+    	"cpp-output",
+    	"c++-cpp-output",
+    	"objective-c-cpp-output",
+    	"objective-c++-cpp-output",
+    	"cpp-output",
+    	"c++-cpp-output",
+    	"objective-c-cpp-output",
+    	"objective-c++-cpp-output",
+    	"objective-c-cpp-output",
+    	"objective-c++-cpp-output",
+    	NULL};
+
+    char** transform = (char**)(use_new_names ? new_transforms : old_transforms);
+    char* cur_key = (char*)keys[0];
+    unsigned int i = 0;
+    do
+    {
+    	if(!strcmp(language, cur_key)) {
+			rs_trace("mapped cpp language (new style: %i) %s to %s", use_new_names, language, transform[i]);
+    		return transform[i];
+    	}
+    }
+    while((cur_key = (char*)keys[++i]) != NULL);
+
+	return NULL;
+}
 
 /* Send a request across to the already-open server.
  *
@@ -133,20 +189,59 @@ dcc_send_header(int net_fd,
                 char **argv,
                 struct dcc_hostdef *host)
 {
-    int ret;
+    int ret, i;
+    char **new_argv = NULL;
+    const char *new_lang;
 
+    /* Make a copy so we can mask the Xcode developer dir (no op without
+     * that support enabled */
+    if ((ret = dcc_copy_argv(argv, &new_argv, 0)))
+        return ret;
+    if ((ret = dcc_xci_mask_developer_dir_in_argv(new_argv)))
+        return ret;
+  
     tcp_cork_sock(net_fd, 1);
 
     if ((ret = dcc_x_req_header(net_fd, host->protover)))
         return ret;
     if (host->cpp_where == DCC_CPP_ON_SERVER) {
         if ((ret = dcc_x_cwd(net_fd)))
-            return ret;
+            goto out_error;
+    } else if (host->cpp_where == DCC_CPP_ON_CLIENT) {
+        /* Fix up the -x argument in new_argv, if any, to account for
+         * preprocessing having been done. */
+        int using_clang = 0;
+        for (i = 0; new_argv[i]; i++) {
+        	if (strstr(new_argv[i], "/usr/bin/clang")) // this is a hack to enable using new-style objective-c transformations for clang
+        		using_clang = 1;
+            if (!strcmp(new_argv[i], "-x") && new_argv[i+1]) {
+                new_lang = dcc_map_optx_language_for_cpp(new_argv[i+1], using_clang);
+                if (!new_lang) {
+                    rs_log_error("got unsupported -x language: %s", new_argv[i+1]);
+                    ret = EXIT_DISTCC_FAILED;
+                    goto out_error;
+                }
+                new_argv[i+1] = strdup(new_lang);
+                if (!new_argv[i+1]) {
+                    rs_log_error("failed to duplicate string");
+                    ret = EXIT_OUT_OF_MEMORY;
+                    goto out_error;
+                }
+                break;
+            }
+        }
     }
-    if ((ret = dcc_x_argv(net_fd, "ARGC", "ARGV", argv)))
-        return ret;
+    if ((ret = dcc_x_argv(net_fd, "ARGC", "ARGV", new_argv))) {
+        goto out_error;
+    }
 
+    dcc_free_argv(new_argv);
     return 0;
+  
+  out_error:
+    if (new_argv)
+        dcc_free_argv(new_argv);
+    return ret;
 }
 
 
@@ -336,3 +431,92 @@ int dcc_compile_remote(char **argv,
 
     return ret;
 }
+
+
+#ifdef XCODE_INTEGRATION
+/**
+ * Print information about a host to stdout.
+ *
+ * This function connects to host, sends an HINF query, and prints the result.
+ * Xcode uses the output to determine various characteristics about the host,
+ * such as the hardware and operating system in use, the compilers available,
+ * and the number of CPUs available.  Only distccd servers built with Xcode
+ * integration support HINF.
+ *
+ * @param host The host to query.
+ *
+ * Returns 0 on success, otherwise error.  Returning nonzero does not
+ */
+int dcc_show_host_info(char *host)
+{
+    int to_net_fd = -1, from_net_fd = -1;
+    int ret;
+    pid_t ssh_pid = 0;
+    int ssh_status;
+    char *info;
+    struct dcc_hostdef *hostdef;
+    int n_hosts = 0;
+    const char *argv[] = { "--host-info", NULL };
+
+    if ((ret = dcc_parse_hosts(host, "command line",
+                               &hostdef, &n_hosts, NULL))) {
+        rs_log_error("bad host argument: %s", host);
+        return ret;
+    }
+
+    if (n_hosts != 1) {
+        rs_log_error("too many hosts for --host-info %s", host);
+        return EXIT_BAD_ARGUMENTS;
+    }
+
+    if ((ret = dcc_remote_connect(hostdef, &to_net_fd,
+                                  &from_net_fd, &ssh_pid))) {
+        rs_log_error("couldn't connect to %s", host);
+        printf("ERROR=%d\n", errno);
+        return ret;
+    }
+
+    if ((ret = dcc_send_header(to_net_fd, (char**)argv, hostdef)) != 0) {
+        rs_log_error("failed to send request");
+        printf("ERROR=%d\n", errno);
+        goto out;
+    }
+
+    /* Pop the cork placed by dcc_send_header.  Normally the cork gets
+     * popped in dcc_compile_remote, but that function won't be called
+     * when running --host-info. */
+    tcp_cork_sock(to_net_fd, 0);
+
+    if ((ret = dcc_r_result_header(from_net_fd, hostdef->protover)))
+        goto out; /* dcc_r_result_header logs its own error on failure */
+
+    if ((ret = dcc_r_token_string(from_net_fd, "HINF", &info))) {
+        rs_log_error("failed to read result");
+        printf("ERROR=%d\n", errno);
+    }
+
+  out:
+    /* Close socket so that the server can terminate, rather than
+     * making it wait until we've finished our work. */
+    if (to_net_fd != from_net_fd) {
+        if (to_net_fd != -1)
+            dcc_close(to_net_fd);
+    }
+    if (from_net_fd != -1)
+        dcc_close(from_net_fd);
+
+    /* Collect the SSH child.  Strictly this is unnecessary; it might slow the
+     * client down a little when things could otherwise be proceeding in the
+     * background.  But it helps make sure that we don't assume we succeeded
+     * when something possibly went wrong, and it allows us to account for the
+     * cost of the ssh child. */
+    if (ssh_pid) {
+        dcc_collect_child("ssh", ssh_pid, &ssh_status, timeout_null_fd); /* ignore failure */
+    }
+
+    if (!ret)
+        printf("%s\n", info);
+
+    return ret;
+}
+#endif /* XCODE_INTEGRATION */

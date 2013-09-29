@@ -62,6 +62,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <signal.h>
+#include <string.h>
 #include <time.h>
 
 #include <sys/stat.h>
@@ -90,6 +91,9 @@
 #include "stringmap.h"
 #include "dotd.h"
 #include "fix_debug_info.h"
+#ifdef XCODE_INTEGRATION
+#  include "xci.h"
+#endif
 #ifdef HAVE_GSSAPI
 #include "auth.h"
 
@@ -363,9 +367,11 @@ static int dcc_check_compiler_masq(char *compiler_name)
 
 static const char *include_options[] = {
     "-I",
+    "-F",
     "-include",
     "-imacros",
     "-idirafter",
+    "-iframework",
     "-iprefix",
     "-iwithprefix",
     "-iwithprefixbefore",
@@ -501,19 +507,30 @@ static int tweak_arguments_for_server(char **argv,
                                       const char *root_dir,
                                       const char *deps_fname,
                                       char **dotd_target,
-                                      char ***tweaked_argv)
+                                      char ***tweaked_argv,
+                                      int *send_back_dotd)
 {
-    int ret;
+    int ret, parsed_needs_dotd = 0, parsed_sets_dotd_target = 0;
+    char *parsed_deps_fname = NULL, *parsed_dotd_target = NULL;
     *dotd_target = 0;
     if ((ret = dcc_copy_argv(argv, tweaked_argv, 3)))
-      return 1;
+        return 1;
 
-    if ((ret = dcc_convert_mt_to_dotd_target(*tweaked_argv, dotd_target)))
-      return 1;
+    dcc_get_dotd_info(argv, &parsed_deps_fname, &parsed_needs_dotd,
+                      &parsed_sets_dotd_target, &parsed_dotd_target);
+    if (parsed_deps_fname)
+        free(parsed_deps_fname);
+  
+    /* If the client wanted a deps file, tweak it to work on the server. */
+    if (parsed_needs_dotd) {
+        if ((ret = dcc_convert_mt_to_dotd_target(*tweaked_argv, dotd_target)))
+            return 1;
 
-    dcc_argv_append(*tweaked_argv, strdup("-MMD"));
-    dcc_argv_append(*tweaked_argv, strdup("-MF"));
-    dcc_argv_append(*tweaked_argv, strdup(deps_fname));
+        dcc_argv_append(*tweaked_argv, strdup("-MMD"));
+        dcc_argv_append(*tweaked_argv, strdup("-MF"));
+        dcc_argv_append(*tweaked_argv, strdup(deps_fname));
+    }
+    *send_back_dotd = parsed_needs_dotd;
 
     tweak_include_arguments_for_server(*tweaked_argv, root_dir);
     tweak_input_argument_for_server(*tweaked_argv, root_dir);
@@ -585,6 +602,10 @@ static int dcc_run_job(int in_fd,
     char *server_cwd = NULL;
     char *client_cwd = NULL;
     int changed_directory = 0;
+    int send_back_dotd = 0;
+#ifdef XCODE_INTEGRATION
+    const char *host_info;
+#endif
 
     gettimeofday(&start, NULL);
 
@@ -625,9 +646,25 @@ static int dcc_run_job(int in_fd,
     }
 
     if ((ret = dcc_r_argv(in_fd, "ARGC", "ARGV", &argv))
+        || (ret = dcc_xci_unmask_developer_dir_in_argv(argv))
         || (ret = dcc_scan_args(argv, &orig_input_tmp, &orig_output_tmp,
-                                &tweaked_argv)))
+                                &tweaked_argv, &dcc_optx_ext)))
         goto out_cleanup;
+
+#ifdef XCODE_INTEGRATION
+    if (!strcmp(argv[0], "--host-info") && !argv[1]) {
+        host_info = dcc_xci_host_info_string();
+        ret = !host_info ||
+              dcc_x_result_header(out_fd, protover) ||
+              dcc_x_token_string(out_fd, "HINF", host_info);
+
+        /* Uncork now, since we're jumping straight to out_cleanup and
+         * skipping over the uncork that happens when a real job is done. */
+        tcp_cork_sock(out_fd, 0);
+
+        goto out_cleanup;
+    }
+#endif /* XCODE_INTEGRATION */
 
     /* The orig_input_tmp and orig_output_tmp values returned by dcc_scan_args()
      * are aliased with some element of tweaked_argv.  We need to copy them,
@@ -657,7 +694,8 @@ static int dcc_run_job(int in_fd,
         if (dcc_r_many_files(in_fd, temp_dir, compr)
             || dcc_set_output(argv, temp_o)
             || tweak_arguments_for_server(argv, temp_dir, deps_fname,
-                                          &dotd_target, &tweaked_argv))
+                                          &dotd_target, &tweaked_argv,
+                                          &send_back_dotd))
             goto out_cleanup;
         /* Repeat the switcharoo trick a few lines above. */
         dcc_free_argv(argv);
@@ -717,15 +755,23 @@ static int dcc_run_job(int in_fd,
             goto out_cleanup;
 
         if (cpp_where == DCC_CPP_ON_SERVER) {
-            char *cleaned_dotd;
-            ret = dcc_cleanup_dotd(deps_fname,
-                                   &cleaned_dotd,
-                                   temp_dir,
-                                   dotd_target ? dotd_target : orig_output,
-                                   temp_o);
-            if (ret) goto out_cleanup;
-            ret = dcc_x_file(out_fd, cleaned_dotd, "DOTD", compr, NULL);
-            free(cleaned_dotd);
+            if (send_back_dotd) {
+                char *cleaned_dotd;
+                ret = dcc_cleanup_dotd(deps_fname,
+                                       &cleaned_dotd,
+                                       temp_dir,
+                                       dotd_target ? dotd_target : orig_output,
+                                       temp_o);
+                if (ret) goto out_cleanup;
+                ret = dcc_x_file(out_fd, cleaned_dotd, "DOTD", compr, NULL);
+                free(cleaned_dotd);
+            } else {
+                /* The current client always expects a DOTD token, so we have
+                 * to send it one indicating size 0 so we don't cause a "wire"
+                 * change which would make some client/server mixes fail.
+                 */
+                ret = dcc_x_token_int(out_fd, "DOTD", 0);
+            }
         }
 
         job_result = STATS_COMPILE_OK;
@@ -808,6 +854,8 @@ out_cleanup:
         dcc_free_argv(argv);
     if (tweaked_argv)
         dcc_free_argv(tweaked_argv);
+
+    dcc_optx_ext = NULL;
 
     free(temp_dir);
     free(temp_i);

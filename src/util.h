@@ -61,3 +61,7 @@ int dcc_tokenize_string(const char *in, char ***argv_ptr);
 #ifndef HAVE_GETLINE
 ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 #endif
+
+char *dcc_replace_substring(const char *s,
+                            const char *find, const char *replace);
+

@@ -49,36 +49,42 @@ DEBUG_DATA = basics.DEBUG_DATA
 NotCoveredError = basics.NotCoveredError
 
   
-def _RealPrefixWithinClientRoot(client_root, path):
-  """Determine longest directory prefix of PATH and whether PATH contains a symlink.
+def _RealPrefix(path, in_dir):
+  """Determine longest directory prefix and whether path contains a symlink.
 
-  Given an absolute path CLIENT_ROOT and an absolute path PATH that is
-  interpreted as relative to CLIENT_ROOT, figure out the longest prefix
-  of PATH such that every component of the prefix is a directory -- not
-  a file or symlink -- when interpreted relative to CLIENT_ROOT.
+  Given an absolute path PATH, figure out the longest prefix of PATH where
+  every component of the prefix is a directory -- not a file or symlink.
+
+  Checking does not begin until entering in_dir, to allow for directory
+  hierarchies that may contain insignificant symbolic links.  This handles
+  the case where /tmp is a symbolic link, as on Mac OS X.  in_dir must be
+  a parent of path.
 
   Args:
     path: a string starting with '/'
   Returns:
     a pair consisting of
     - the prefix
-    - a bool, which is True iff PATH contained a symlink.
+    - a bool, which is True iff PATH contained a symlink within in_dir.
   """
+  assert in_dir == path[:len(in_dir)] and path[len(in_dir)] == '/'
   prefix = "/"
   parts = path.split('/')
   while prefix != path:
     part = parts.pop(0)
     last_prefix = prefix
     prefix = os.path.join(prefix, part)
-    if os.path.islink(client_root + prefix):
+    if len(prefix) < len(in_dir):
+      continue
+    if os.path.islink(prefix):
       return last_prefix, True
-    if not os.path.isdir(client_root + prefix):
+    if not os.path.isdir(prefix):
       return last_prefix, False
   return path, False
 
 
 def _MakeLinkFromMirrorToRealLocation(system_dir, client_root, system_links):
-  """Create a link under client root what will resolve to system dir on server.
+  """Create a link under client root that will resolve to system dir on server.
 
   See comments for CompilerDefaults class for rationale.
 
@@ -107,13 +113,12 @@ def _MakeLinkFromMirrorToRealLocation(system_dir, client_root, system_links):
   if os.path.realpath(system_dir) != system_dir:
     raise NotCoveredError(
         "Default compiler search path '%s' must be a realpath." %s)
+  rooted_system_dir = client_root + system_dir
   # Typical values for rooted_system_dir:
   #  /dev/shm/tmpX.include_server-X-1/usr/include
-  real_prefix, is_link = _RealPrefixWithinClientRoot(client_root, system_dir)
-  parent = os.path.dirname(system_dir)
-  rooted_system_dir = client_root + system_dir
-  rooted_parent = client_root + parent
-  if real_prefix == system_dir:
+  real_prefix, is_link = _RealPrefix(rooted_system_dir, client_root)
+  parent = os.path.dirname(rooted_system_dir)
+  if real_prefix == rooted_system_dir:
     # rooted_system_dir already exists as a real (non-symlink) path.
     # Make rooted_system_dir a link.
     #
@@ -137,11 +142,11 @@ def _MakeLinkFromMirrorToRealLocation(system_dir, client_root, system_links):
       assert os.path.islink(rooted_system_dir)
       return
   elif not is_link:
-    os.makedirs(rooted_parent)
+    os.makedirs(parent)
   else:
     # A link above real_prefix has already been created with this routine.
     return
-  assert _RealPrefixWithinClientRoot(client_root, parent) == (parent, False), (client_root, parent)
+  assert _RealPrefix(parent, client_root) == (parent, False), parent
   depth = len([c for c in system_dir if c == '/'])
   # The more directories on the path system_dir, the more '../' need to
   # appended. We add enough '../' to get to the root directory. It's OK
@@ -155,18 +160,19 @@ def _MakeLinkFromMirrorToRealLocation(system_dir, client_root, system_links):
   system_links.append(rooted_system_dir)
 
 
-def _SystemSearchdirsGCC(compiler, sysroot, language, canonical_lookup):
+def _SystemSearchdirsGCC(compiler, language, sysroot_args, canonical_lookup):
   """Run gcc on empty file; parse output to figure out default paths.
 
   This function works only for gcc, and only some versions at that.
 
   Arguments:
     compiler: a filepath (the first argument on the distcc command line)
-    sysroot: the --sysroot passed to the compiler ("" to disable)
     language: 'c' or 'c++' or other item in basics.LANGUAGES
+    sysroot_args: list of -isysroot or --sysroot args for gcc's command line.
     canonical_lookup: a function that maps strings to their realpaths
   Returns:
-    list of system search dirs for this compiler and language
+    list of pairs of system search dirs and their type for this compiler and
+    language
 
   """
 
@@ -185,11 +191,8 @@ def _SystemSearchdirsGCC(compiler, sysroot, language, canonical_lookup):
   # blah. blah.
   #------------
 
-  command = [compiler]
-  if sysroot:
-    command += ["--sysroot=" + sysroot]
-  command += ["-x", language, "-v", "-c", "/dev/null", "-o", "/dev/null"]
-  Debug(DEBUG_DATA, "system search dirs command: %s" % command)
+  command = [compiler, "-x", language ] + sysroot_args + [ "-v", "-c",
+             "/dev/null", "-o", "/dev/null"]
 
   try:
     # We clear the environment, because otherwise, directories
@@ -236,33 +239,37 @@ def _SystemSearchdirsGCC(compiler, sysroot, language, canonical_lookup):
     % ("#include <...> search starts here:", "End of search list"),
     out,
     re.MULTILINE + re.DOTALL)
+
+  parse_error_msg = \
+           ( "Couldn't determine default system include directories\n"
+           + "for compiler '%s', language '%s':\n"
+           + "couldn't parse output of '%s'.\nReceived:\n%s") % \
+           (compiler, language, command, out)
+
   if match_obj == None:
-    raise NotCoveredError(
-             ( "Couldn't determine default system include directories\n"
-             + "for compiler '%s', language '%s':\n"
-             + "couldn't parse output of '%s'.\nReceived:\n%s") %
-             (compiler, language, command, out))
-  return [ canonical_lookup(directory)
-           for line in match_obj.group(1).split("\n")
-           for directory in line.split()
-           # Ignore Apple-modified MacOS gcc's "framework" directories.
-           if not line.endswith(" (framework directory)")
-           ]
-           # TODO: Rather than just ignoring framework directories, we
-           # should handle them properly, fully emulating the search
-           # algorithm used by Apple's modified GCC.
-           # The search algorithm used for framework directories is not very
-           # well documented, as far as I can tell, but the source code is in
-           # gcc/config/darwin-c.c in the Apple GCC sources.
-           # From a quick glance, I think it looks like this:
-           # - For each #include of the form Foo/bar.h,
-           #        For each framework directory Baz,
-           #            Look in Baz/Foo.framework/Headers/bar.h
-           #            and in Baz/Foo.framework/PrivateHeaders/bar.h
-           # - If the regular search fails, look for subframeworks.
-           #     For each #include of the form Foo/bar.h
-           #       from Baz/Quux.framework/Headers/whatever.h
-           #            Look in Baz/Quux.framework/Frameworks/Foo/Headers/bar.h.
+    raise NotCoveredError(parse_error_msg)
+
+  directories = []
+  for directory in match_obj.group(1).split('\n'):
+    if not directory.startswith(' '):
+      raise NotCoveredError(parse_error_msg)
+
+    directory = directory[1:]
+    directory_type = basics.INCLUDE_DIR_NORMAL
+
+    # For our purposes, it doesn't matter whether the directory is a framework
+    # directory (-F) or an include directory (-I).  This only applies when
+    # using Apple GCC.
+    framework_string = ' (framework directory)'
+    if directory.endswith(framework_string):
+      directory = directory[:-len(framework_string)]
+      directory_type = basics.INCLUDE_DIR_FRAMEWORKS
+
+
+    directories.append((canonical_lookup(directory), directory_type))
+
+  return directories
+
 
 class CompilerDefaults(object):
   """Records and caches the default search dirs and creates symlink farm.
@@ -325,7 +332,7 @@ class CompilerDefaults(object):
         system_dirs_real_paths[c][lang] is a list of directory paths
         (strings) for compiler c and language lang
       system_dirs_default: a list of all such strings, subjected to
-        realpath-ification, for all c and lang
+        realpath-ification, for all c, lang, and sysroot
       client_root: a path such as /dev/shm/tmpX.include_server-X-1
       system_links: locations under client_root representing system default dirs
     """
@@ -335,13 +342,20 @@ class CompilerDefaults(object):
     self.system_links = []
     self.client_root = client_root
 
-  def SetSystemDirsDefaults(self, compiler, sysroot, language, timer=None):
+  def SetSystemDirsDefaults(self, compiler, language, sysroot_info, timer=None):
     """Set instance variables according to compiler, and make symlink farm.
 
     Arguments:
       compiler: a filepath (the first argument on the distcc command line)
-      sysroot: the --sysroot passed to the compiler ("" to disable)
       language: 'c' or 'c++' or other item in basics.LANGUAGES
+      sysroot_info: pair with the compiler's system root settings in string
+        form (for logging or using as a dictionary key) and as list of args
+        for use in gcc's command line.  Examples:
+          ( '-isysroot /b/sandbox/', [ '-sysroot', '/b/sandbox/' ] )
+        or
+          ( '--sysroot=/b/sandbox/', [ '-sysroot=/b/sandbox/' ] )
+        or
+          ( '', [] )
       timer: a basis.IncludeAnalyzerTimer or None
 
     The timer will be disabled during this routine because the select involved
@@ -351,36 +365,42 @@ class CompilerDefaults(object):
     """
     assert isinstance(compiler, str)
     assert isinstance(language, str)
+    assert isinstance(sysroot_info, tuple)
+    assert len(sysroot_info) == 2
+    assert isinstance(sysroot_info[0], str)
+    assert isinstance(sysroot_info[1], list)
+    sysroot = sysroot_info[0]
     Debug(DEBUG_TRACE,
-          "SetSystemDirsDefaults with CC, SYSROOT, LANG: %s, %s, %s" %
-          (compiler, sysroot, language))
+          "SetSystemDirsDefaults with CC, LANG, SYSROOT: %s, %s, %s" %
+          (compiler, language, sysroot))
     if compiler in self.system_dirs_default:
-      if sysroot in self.system_dirs_default[compiler]:
-        if language in self.system_dirs_default[compiler][sysroot]:
+      if language in self.system_dirs_default[compiler]:
+        if sysroot in self.system_dirs_default[compiler][language]:
           return
       else:
-        self.system_dirs_default[compiler][sysroot] = {}
+        self.system_dirs_default[compiler][language] = {}
     else:
-      self.system_dirs_default[compiler] = {sysroot: {}}
+      self.system_dirs_default[compiler] = { language: {} }
     try:
       if timer:
         # We have to disable the timer because the select system call that is
         # executed when calling the compiler through Popen gives up if presented
         # with a SIGALRM.
         timer.Stop()
-      self.system_dirs_default[compiler][sysroot][language] = (
-        _SystemSearchdirsGCC(compiler,
-                             sysroot, language, self.canonical_lookup))
+      self.system_dirs_default[compiler][language][sysroot] = (
+        _SystemSearchdirsGCC(compiler, language, sysroot_info[1],
+                             self.canonical_lookup))
       Debug(DEBUG_DATA,
             "system_dirs_default[%s][%s][%s]: %s" %
-            (compiler, sysroot, language,
-             self.system_dirs_default[compiler][sysroot][language]))
+            (compiler, language, sysroot,
+             self.system_dirs_default[compiler][language][sysroot]))
       # Now summarize what we know and add to system_dirs_default_all.
       self.system_dirs_default_all |= (
-          set(self.system_dirs_default[compiler][sysroot][language]))
+          set([ d for (d, t) in
+                  self.system_dirs_default[compiler][language][sysroot] ]))
       # Construct the symlink farm for the compiler default dirs.
-      for system_dir in self.system_dirs_default[compiler][sysroot][language]:
-        _MakeLinkFromMirrorToRealLocation(system_dir, self.client_root,
+      for (sys_dir, t) in self.system_dirs_default[compiler][language][sysroot]:
+        _MakeLinkFromMirrorToRealLocation(sys_dir, self.client_root,
                                           self.system_links)
     finally:
       if timer:
