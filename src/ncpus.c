@@ -211,4 +211,26 @@ int dcc_cpuspeed(unsigned long long *speed)
 
 }
 
+int dcc_memory(unsigned long long *memory)
+{
+#if defined(__APPLE__)
+	
+    int mib[2];
+    size_t len = sizeof(*memory);
+	mib[0] = CTL_HW;
+    mib[1] = HW_MEMSIZE;
+    if (sysctl(mib, 2, memory, &len, NULL, 0) == 0)
+        return 0;
+    else {
+        rs_log_error("sysctl(HW_MEMSIZE) failed: %s",
+                     strerror(errno));
+        *memory = 1;
+        return EXIT_DISTCC_FAILED;
+    }
+	
+#else
+#error "Implement me!"
+#endif
+}
+
 #endif /* XCODE_INTEGRATION */

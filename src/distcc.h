@@ -143,6 +143,7 @@ int dcc_parse_hosts(const char *where, const char *source_name,
 int dcc_ncpus(int *);
 #ifdef XCODE_INTEGRATION
 int dcc_cpuspeed(unsigned long long *);
+int dcc_memory(unsigned long long *memory);
 #endif
 
 /* ssh.c */

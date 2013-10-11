@@ -291,12 +291,15 @@ static char *dcc_xci_path_in_prefix(const char *path) {
  *
  * On failure, returns NULL.
  **/
+char const*static_compilers_data = "Toolchains/XcodeDefault.xctoolchain/usr/bin/cc\n"
+"Toolchains/XcodeDefault.xctoolchain/usr/bin/clang\n"
+"Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++\n";
 static const dcc_xci_compiler_info *dcc_xci_parse_distcc_compilers(void) {
     static int parsed_compilers = 0;
     static dcc_xci_compiler_info *compilers = NULL;
     char *compilers_path = NULL;
     FILE *compilers_file = NULL;
-    char *compilers_data = NULL;
+    char *compilers_data = strdup(static_compilers_data);
     char *line, *newline;
     size_t len, pos, line_len;
     dcc_xci_compiler_info *ci = NULL, *last_ci = NULL;
@@ -308,21 +311,22 @@ static const dcc_xci_compiler_info *dcc_xci_parse_distcc_compilers(void) {
 
     parsed_compilers = 1;
 
-    compilers_path = dcc_xci_path_in_prefix("share/distcc_compilers");
-    if (!compilers_path)
-        goto out_error;
-
-    if (!(compilers_file = fopen(compilers_path, "r"))) {
-        rs_log_error("fopen(\"%s\", \"r\") failed: %s",
-                     compilers_path, strerror(errno));
-        goto out_error;
-    }
-
-    if (!(compilers_data = dcc_xci_read_whole_file(compilers_file, &len))) {
-        rs_log_error("dcc_xci_read_whole_file failed for \"%s\"",
-                     compilers_path);
-        goto out_error;
-    }
+//    compilers_path = dcc_xci_path_in_prefix("share/distcc_compilers");
+//    if (!compilers_path)
+//        goto out_error;
+//
+//    if (!(compilers_file = fopen(compilers_path, "r"))) {
+//        rs_log_error("fopen(\"%s\", \"r\") failed: %s",
+//                     compilers_path, strerror(errno));
+//        goto out_error;
+//    }
+//
+//    if (!(compilers_data = dcc_xci_read_whole_file(compilers_file, &len))) {
+//        rs_log_error("dcc_xci_read_whole_file failed for \"%s\"",
+//                     compilers_path);
+//        goto out_error;
+//    }
+	len = strlen(compilers_data);
 
     for (pos = 0; pos < len; pos += line_len + 1) {
         line = compilers_data + pos;
@@ -361,7 +365,8 @@ static const dcc_xci_compiler_info *dcc_xci_parse_distcc_compilers(void) {
         /* Determine an absolute path to the compiler. */
         if (!(ci->absolute_path = dcc_xci_path_in_prefix(ci->raw_path)))
             goto out_error;
-
+		
+		rs_log_error("compiler search: %s\n", ci->absolute_path);
         if (stat(ci->absolute_path, &statbuf) == 0) {
             /* The compiler exists.  Get it to report its version. */
             static const char version_args[] = " -v 2>&1";
@@ -956,10 +961,12 @@ const char *dcc_xci_host_info_string() {
     static const char jobs_key[] = "JOBS=";
     static const char priority_key[] = "PRIORITY=";
     static const char sdk_key[] = "SDK=";
+    static const char memory_key[] = "MEMORY=";
     static int has_host_info = 0;
     static char *host_info = NULL;
     int len = 0, pos = 0, ncpus;
     unsigned long long cpuspeed;
+    unsigned long long memory;
     char *info = NULL;
     const char *sys;
     char **compilers = NULL, **compiler;
@@ -996,6 +1003,8 @@ const char *dcc_xci_host_info_string() {
         len += sizeof(jobs_key) + int_decimal_len;
 
     len += sizeof(priority_key) + int_decimal_len;
+	
+	len += sizeof(memory_key) + int_decimal_len;
 
     sdks = dcc_xci_scan_developer_sdks();
     if (sdks) {
@@ -1043,6 +1052,13 @@ const char *dcc_xci_host_info_string() {
     if (dcc_cpuspeed(&cpuspeed) == 0) {
         pos += snprintf(info + pos, len - pos, "%s%llu\n", cpuspeed_key,
                         cpuspeed);
+        if (pos >= len)
+            goto out_error_info_size;
+    }
+	
+    if (dcc_memory(&memory) == 0) {
+        pos += snprintf(info + pos, len - pos, "%s%llu\n", memory_key,
+                        memory);
         if (pos >= len)
             goto out_error_info_size;
     }
