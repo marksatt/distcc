@@ -101,6 +101,9 @@ int dcc_standalone_server(void)
 {
     int listen_fd;
     int n_cpus;
+#ifdef XCODE_INTEGRATION
+    unsigned long long memory;
+#endif
     int ret;
 #ifdef HAVE_AVAHI
 #if 0  // http://code.google.com/p/toolwhip/issues/detail?id=3
@@ -124,7 +127,24 @@ int dcc_standalone_server(void)
     if (arg_max_jobs)
         dcc_max_kids = arg_max_jobs;
     else
-        dcc_max_kids = 2 + n_cpus;
+	{
+#ifdef XCODE_INTEGRATION
+		/* Actually use the memory as the basis - compiler instances in reasonable
+		   codebases typically need ~1GB each so we can't have more running than we 
+		   have memory for. Plus the OS will generally need ~2GB for other processes 
+		   so account for that. Only if the number of logical CPUs is smaller than
+		   the size of memory in GB will it be the value used. There is never any point
+		   to having more children than there is hardware support for either. */
+		if(dcc_memory(&memory) == 0)
+		{
+			int gb = (memory/(1024*1024*1024));
+			int gbLessOS = (gb - 2);
+			dcc_max_kids = n_cpus <= gbLessOS ? n_cpus : gbLessOS;
+		}
+		else
+#endif
+			dcc_max_kids = 2 + n_cpus;
+	}
 
     rs_log_info("allowing up to %d active jobs", dcc_max_kids);
 

@@ -125,7 +125,7 @@ int opt_zeroconf = 0;
  * Xcode when sorting the hosts in DISTCC_HOSTS.  The Xcode UI maps
  * "low" to 20, "medium" to 10, and "high" to 0 when configuring launchd to
  * start distccd. */
-int arg_priority = 10;
+int arg_priority = ~0;
 
 /* System version string override.  If unset, the default will be used.
  * This is handled in xci_versinfo.c. */

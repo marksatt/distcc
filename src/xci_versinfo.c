@@ -1070,6 +1070,10 @@ const char *dcc_xci_host_info_string() {
             goto out_error_info_size;
     }
 
+	if(arg_priority == ~0)
+	{
+		arg_priority = (((memory/(1024*1024*1024)) / ncpus) * cpuspeed) / 250000000;
+	}
     pos += snprintf(info + pos, len - pos, "%s%d\n", priority_key,
                     arg_priority);
     if (pos >= len)
