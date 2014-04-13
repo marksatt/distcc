@@ -215,14 +215,14 @@ static char *dcc_xci_selected_prefix(void) {
         return NULL;
     }
 
-    size = strlen(xcodeselect_path) + sizeof(PREFIXDIR);
+    size = strlen(xcodeselect_path)+1;
     selected_prefix = malloc(size);
     if (!selected_prefix) {
         rs_log_error("malloc() failed: %s", strerror(errno));
         return NULL;
     }
 
-    snprintf(selected_prefix, size, "%s%s", xcodeselect_path, PREFIXDIR);
+    snprintf(selected_prefix, size, "%s", xcodeselect_path);
 
     return selected_prefix;
 }
