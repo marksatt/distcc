@@ -1072,7 +1072,10 @@ const char *dcc_xci_host_info_string() {
 
 	if(arg_priority == ~0)
 	{
-		arg_priority = (((memory/(1024*1024*1024)) / ncpus) * cpuspeed) / 250000000;
+		// Priority based on normalized CPU speed, faster cores are always preferred
+		// with the baseline set at 2.5GHz. This is then weighted toward machines with
+		// more memory per core.
+		arg_priority = (cpuspeed / 250000000) + ((memory/(1024*1024*1024)) / ncpus);
 	}
     pos += snprintf(info + pos, len - pos, "%s%d\n", priority_key,
                     arg_priority);
