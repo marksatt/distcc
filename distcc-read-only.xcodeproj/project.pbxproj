@@ -157,6 +157,7 @@
 		303AA3E217E9962C0077FFC3 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
+				LastUpgradeCheck = 0510;
 			};
 			buildConfigurationList = 303AA3E517E9962C0077FFC3 /* Build configuration list for PBXProject "distcc-read-only" */;
 			compatibilityVersion = "Xcode 3.2";
@@ -178,7 +179,6 @@
 		303AA3E317E9962C0077FFC3 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD_32_BIT)";
 				COPY_PHASE_STRIP = NO;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
@@ -189,7 +189,6 @@
 		303AA3E417E9962C0077FFC3 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD_32_BIT)";
 				COPY_PHASE_STRIP = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
