@@ -144,7 +144,7 @@
 			buildPhases = (
 			);
 			buildToolPath = /usr/bin/make;
-			buildWorkingDirectory = "/Users/marksatt/Documents/Development/Open Source/distcc-read-only";
+			buildWorkingDirectory = "$(PROJECT_DIR)";
 			dependencies = (
 			);
 			name = "distcc-read-only";

@@ -366,8 +366,7 @@ static const dcc_xci_compiler_info *dcc_xci_parse_distcc_compilers(void) {
         if (!(ci->absolute_path = dcc_xci_path_in_prefix(ci->raw_path)))
             goto out_error;
 		
-		rs_log_error("compiler search: %s\n", ci->absolute_path);
-        if (stat(ci->absolute_path, &statbuf) == 0) {
+		if (stat(ci->absolute_path, &statbuf) == 0) {
             /* The compiler exists.  Get it to report its version. */
             static const char version_args[] = " -v 2>&1";
             size_t cmd_len = strlen(ci->absolute_path) + sizeof(version_args);
@@ -451,7 +450,7 @@ static const dcc_xci_compiler_info *dcc_xci_parse_distcc_compilers(void) {
     free(compilers_data);
     compilers_data = NULL;
 
-    if (fclose(compilers_file)) {
+    if (compilers_file && fclose(compilers_file)) {
         rs_log_error("fclose(\"%s\") failed: %s",
                      compilers_path, strerror(errno));
         /* Don't fail, just live with it. */
@@ -753,7 +752,10 @@ static char *dcc_xci_create_sdk_info(const char *path) {
     /* Skip past the developer dir and following slash. */
     sdk_path = path + xcode_dev_dir_len + 1;
 
-    snprintf(buf, sizeof(buf), "%s/SDKSettings.plist", path);
+    snprintf(buf, sizeof(buf), "plutil -convert xml1 -o /tmp/SDKSettings.plist %s/SDKSettings.plist", path);
+    system(buf);
+    
+    snprintf(buf, sizeof(buf), "/tmp/SDKSettings.plist");
     if (!(plist_file = fopen(buf, "r"))) {
         rs_log_error("fopen(%s) failed: %s", buf, strerror(errno));
         goto bail_out;
@@ -773,8 +775,11 @@ static char *dcc_xci_create_sdk_info(const char *path) {
     free(plist);
     plist = NULL;
 
+    snprintf(buf, sizeof(buf), "plutil -convert xml1 -o /tmp/SystemVersion.plist %s/System/Library/CoreServices/SystemVersion.plist", path);
+    system(buf);
+    
     snprintf(buf, sizeof(buf),
-             "%s/System/Library/CoreServices/SystemVersion.plist", path);
+             "/tmp/SystemVersion.plist");
     if (!(plist_file = fopen(buf, "r"))) {
         rs_log_error("fopen(%s) failed: %s", buf, strerror(errno));
         goto bail_out;
