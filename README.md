@@ -1,37 +1,33 @@
-			Distcc + Xcode Integration
-			==========================
+Distcc + Xcode Integration
+==========================
 			
 This is a fork of: 						
 
-	  distcc -- a free distributed C/C++ compiler system
+distcc -- a free distributed C/C++ compiler system
 
-		   [link](http://code.google.com/p/distcc/)
+[http://code.google.com/p/distcc/](http://code.google.com/p/distcc/)
 
-		    by Martin Pool <mbp@samba.org>
+by Martin Pool <mbp@samba.org>
 
-		    "pump" functionality added by
- Fergus Henderson, Nils Klarlund, Manos Renieris, and Craig Silverstein
-			    (Google Inc.)
+"pump" functionality added by Fergus Henderson, Nils Klarlund, Manos Renieris, and Craig Silverstein (Google Inc.)
 			    
-Containing the Xcode integration code from Apple used in Xcode 3 and earlier.
-The Apple code is found here: [link](http://www.opensource.apple.com/source/distcc/)
-Or as a tarball here: [link](http://opensource.apple.com/tarballs/distcc/)
+Containing the Xcode integration code v. 2805 from Apple used in Xcode 3 and earlier.
+The Apple code is found here: [http://www.opensource.apple.com/source/distcc/](http://www.opensource.apple.com/source/distcc/)
+Or as a tarball here: [http://opensource.apple.com/tarballs/distcc/](http://opensource.apple.com/tarballs/distcc/)
 
 Additional changes have been made to integrate into Xcode 5+ as part of DistCode:
-	 [link](https://github.com/marksatt/DistCode)
+	 [https://github.com/marksatt/DistCode](https://github.com/marksatt/DistCode)
 
 Original Readme
 ---------------
 
-	  distcc -- a free distributed C/C++ compiler system
+distcc -- a free distributed C/C++ compiler system
 
-		   [link](http://code.google.com/p/distcc/)
+http://code.google.com/p/distcc/
 
-		    by Martin Pool <mbp@samba.org>
+by Martin Pool <mbp@samba.org>
 
-		    "pump" functionality added by
- Fergus Henderson, Nils Klarlund, Manos Renieris, and Craig Silverstein
-			    (Google Inc.)
+"pump" functionality added by Fergus Henderson, Nils Klarlund, Manos Renieris, and Craig Silverstein (Google Inc.)
 			    
 distcc is a program to distribute compilation of C or C++ code across
 several machines on a network. distcc should always generate the same
